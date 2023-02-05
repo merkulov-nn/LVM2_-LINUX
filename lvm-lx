@@ -1,0 +1,153 @@
+Подготовим временнýй том длā / раздела:
+[root@lvm vagrant]# pvcreate /dev/sdb
+  Physical volume "/dev/sdb" successfully created.
+  
+[root@lvm vagrant]# vgcreate vg_root /dev/sdb
+  Volume group "vg_root" successfully created
+  
+[root@lvm vagrant]# lvcreate -n lv_root -l +100%FREE /dev/vg_root
+  Logical volume "lv_root" created.
+
+Создадим на нем файловуĀ систему и смонтируем его, чтобý перенести туда даннýе:
+root@lvm vagrant]# mkfs.xfs /dev/vg_root/lv_root
+meta-data=/dev/vg_root/lv_root   isize=512    agcount=4, agsize=655104 blks
+         =                       sectsz=512   attr=2, projid32bit=1
+         =                       crc=1        finobt=0, sparse=0
+data     =                       bsize=4096   blocks=2620416, imaxpct=25
+         =                       sunit=0      swidth=0 blks
+naming   =version 2              bsize=4096   ascii-ci=0 ftype=1
+log      =internal log           bsize=4096   blocks=2560, version=2
+         =                       sectsz=512   sunit=0 blks, lazy-count=1
+realtime =none                   extsz=4096   blocks=0, rtextents=0
+
+mount /dev/vg_root/lv_root /mnt
+
+Этой командой скопируем все даннýе с / раздела в /mnt:
+xfsdump -J - /dev/VolGroup00/LogVol00 | xfsrestore -J - /mnt
+xfsrestore: Restore Status: SUCCESS
+
+Затем переконфигурируем grub длā того, чтобý при старте перейти в новýй /
+Сýмитируем текущий root -> сделаем в него chroot и обновим grub:
+[root@lvm /]# grub2-mkconfig -o /boot/grub2/grub.cfg
+Generating grub configuration file ...
+Found linux image: /boot/vmlinuz-3.10.0-862.2.3.el7.x86_64
+Found initrd image: /boot/initramfs-3.10.0-862.2.3.el7.x86_64.img
+done
+
+Обновим образ initrd. Что ÿто такое и зачем нужно вý узнаете из след. лекции.
+cd /boot ; for i in `ls initramfs-*img`; do dracut -v $i `echo $i|sed "s/initramfs-//g;
+s/.img//g"` --force; done
+*** Creating image file ***
+*** Creating image file done ***
+*** Creating initramfs image file '/boot/initramfs-3.10.0-862.2.3.el7.x86_64.img' done ***
+
+Перезагружаемсā успешно с новýм рут томом. Убедитþсā в ÿтом можно посмотрев вýвод
+lsblk:
+lsblk
+[root@lvm boot]# lsblk
+NAME                    MAJ:MIN RM  SIZE RO TYPE MOUNTPOINT
+sda                       8:0    0   40G  0 disk 
+├─sda1                    8:1    0    1M  0 part 
+├─sda2                    8:2    0    1G  0 part /boot
+└─sda3                    8:3    0   39G  0 part 
+  ├─VolGroup00-LogVol00 253:0    0 37.5G  0 lvm  
+  └─VolGroup00-LogVol01 253:1    0  1.5G  0 lvm  [SWAP]
+sdb                       8:16   0   10G  0 disk 
+└─vg_root-lv_root       253:2    0   10G  0 lvm  /
+sdc                       8:32   0    2G  0 disk 
+sdd                       8:48   0    1G  0 disk 
+sde                       8:64   0    1G  0 disk 
+
+Теперþ нам нужно изменитþ размер старой VG и вернутþ на него рут. Длā ÿтого удалāем
+старýй LV размеров в 40G и создаем новýй на 8G:
+[root@lvm boot]# lvremove /dev/VolGroup00/LogVol00
+  Logical volume VolGroup00/LogVol00 contains a filesystem in use.
+  
+  [root@lvm vagrant]# mkfs.xfs /dev/VolGroup00/LogVol00
+mkfs.xfs: /dev/VolGroup00/LogVol00 contains a mounted filesystem
+Usage: mkfs.xfs
+/* blocksize */		[-b log=n|size=num]
+/* metadata */		[-m crc=0|1,finobt=0|1,uuid=xxx]
+/* data subvol */	[-d agcount=n,agsize=n,file,name=xxx,size=num,
+			    (sunit=value,swidth=value|su=num,sw=num|noalign),
+			    sectlog=n|sectsize=num
+/* force overwrite */	[-f]
+/* inode size */	[-i log=n|perblock=n|size=num,maxpct=n,attr=0|1|2,
+			    projid32bit=0|1]
+/* no discard */	[-K]
+/* log subvol */	[-l agnum=n,internal,size=num,logdev=xxx,version=n
+			    sunit=value|su=num,sectlog=n|sectsize=num,
+			    lazy-count=0|1]
+/* label */		[-L label (maximum 12 characters)]
+/* naming */		[-n log=n|size=num,version=2|ci,ftype=0|1]
+/* no-op info only */	[-N]
+/* prototype file */	[-p fname]
+/* quiet */		[-q]
+/* realtime subvol */	[-r extsize=num,size=num,rtdev=xxx]
+/* sectorsize */	[-s log=n|size=num]
+/* version */		[-V]
+			devicename
+<devicename> is required unless -d name=xxx is given.
+<num> is xxx (bytes), xxxs (sectors), xxxb (fs blocks), xxxk (xxx KiB),
+      xxxm (xxx MiB), xxxg (xxx GiB), xxxt (xxx TiB) or xxxp (xxx PiB).
+<value> is xxx (512 byte blocks).
+
+xfsdump -J - /dev/vg_root/lv_root | xfsrestore -J - /mnt
+xfsrestore: Restore Status: SUCCESS
+
+[root@lvm /]# grub2-mkconfig -o /boot/grub2/grub.cfg
+Generating grub configuration file ...
+Found linux image: /boot/vmlinuz-3.10.0-862.2.3.el7.x86_64
+Found initrd image: /boot/initramfs-3.10.0-862.2.3.el7.x86_64.img
+done
+
+cd /boot ; for i in `ls initramfs-*img`; do dracut -v $i `echo $i|sed "s/initramfs-//g;
+s/.img//g"` --force; done
+*** Creating image file ***
+*** Creating image file done ***
+*** Creating initramfs image file '/boot/initramfs-3.10.0-862.2.3.el7.x86_64.img' done ***
+
+На свободнýх дисках создаем зеркало:
+[root@lvm boot]# pvcreate /dev/sdc /dev/sdd
+  Physical volume "/dev/sdc" successfully created.
+  Physical volume "/dev/sdd" successfully created.
+
+[root@lvm boot]# vgcreate vg_var /dev/sdc /dev/sdd
+  Volume group "vg_var" successfully created
+
+[root@lvm boot]# lvcreate -L 950M -m1 -n lv_var vg_var
+  Rounding up size to full physical extent 952.00 MiB
+  Logical volume "lv_var" created.
+
+Создаем на нем ФС и перемещаем туда /var:
+mkfs.ext4 /dev/vg_var/lv_var
+Writing superblocks and filesystem accounting information: done
+
+Ну и монтируем новýй var в каталог /var:
+umount /mnt
+mount /dev/vg_var/lv_var /var
+
+Правим fstab длā автоматического монтированиā /var:
+[root@lvm boot]# echo "`blkid | grep var: | awk '{print $2}'` /var ext4 defaults 0 0" >> /etc/fstab
+
+После чего можно успешно перезагружатþсā в новýй (уменþшеннýй root) и удалāтþ
+временнуĀ Volume Group:
+[root@lvm boot]# lvremove /dev/vg_root/lv_root
+  Logical volume vg_root/lv_root contains a filesystem in use.
+  
+  [root@lvm boot]# vgremove /dev/vg_root
+Logical volume vg_root/lv_root contains a filesystem in use.
+
+Вýделāем том под /home по тому же принципу что делали
+[root@lvm boot]# lvcreate -n LogVol_Home -L 2G /dev/VolGroup00
+  Volume group "VolGroup00" has insufficient free space (0 extents): 64 required
+
+Сгенерируем файлý в /home/:
+touch /home/file{1..20}
+
+Снāтþ снапшот:
+[root@lvm boot]# lvcreate -L 100MB -s -n home_snap /dev/VolGroup00/LogVol_Home
+  Snapshot origin LV LogVol_Home not found in Volume group VolGroup00.
+  
+  Удалитþ частþ файлов:
+  rm -f /home/file{11..20}
